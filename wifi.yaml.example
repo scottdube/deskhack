@@ -1,0 +1,4 @@
+# Copy to wifi.yaml and fill in. wifi.yaml is gitignored.
+wifi:
+  ssid: "your-ssid"
+  password: "your-password"

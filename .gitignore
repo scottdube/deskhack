@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+# ESPHome wifi credentials — never commit
+wifi.yaml
+secrets.yaml
+# KiCad local state / generated reports
+*.kicad_prl
+*-backups/
+erc.rpt
+fp-info-cache
+# capture scratch
+*.sr
+*.csv
+*.html
+.history/
+~*.lck
+*.kicad_pcb.lck

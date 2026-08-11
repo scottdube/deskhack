@@ -1,0 +1,226 @@
+## ErgoSwiss / LOGICDATA COMPACT-e-3-VAL desk controller
+##
+## Wiring to the cut 7-pin DIN handset extension:
+##   brown  GND      -> ESP32 GND (required, everything is referenced to it)
+##   red    +5V      -> common side of both photoMOS outputs
+##   white  UP       -> photoMOS 1 output
+##   yellow DOWN     -> photoMOS 2 output
+##   black  data out -> 10k/20k divider -> GPIO16 (5V bus, 3.3V pin)
+##
+## The button lines are ACTIVE HIGH: they idle at 0V and a press connects them
+## to +5V. An ESP32 GPIO cannot assert 5V, which is why this uses photoMOS
+## relays (CPC1017N) closing a contact to the red wire rather than MOSFETs
+## pulling to ground. Drive each LED from a GPIO through ~330R.
+##
+## The box reports height as 1000 baud 9N1, but a plain 8N1 UART decodes it:
+## the 9th data bit sits where the stop bit is expected and is 1 for every
+## height word, while the packet header mis-frames into a constant 0xFE that
+## serves as a free sync marker. Each report is therefore 0xFE, <height byte>.
+##   inches = (245 - byte) / 2
+## The box only transmits when the displayed inch changes, so readings are
+## coarse (1 inch) and event-driven, not a continuous stream.
+
+esphome:
+  name: desk
+  on_boot:
+    priority: -100
+    then:
+      - script.execute: all_stop
+
+esp32:
+  board: esp32dev
+
+wifi: !include wifi.yaml
+api:
+logger:
+  level: INFO
+ota:
+  - platform: esphome
+
+uart:
+  id: deskbus
+  rx_pin: GPIO16
+  baud_rate: 1000
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 64
+
+globals:
+  - id: cur_in            # last reported height, inches
+    type: float
+    restore_value: yes
+    initial_value: '30'
+  - id: height_known      # false until the box has told us something
+    type: bool
+    initial_value: 'false'
+  - id: expect_height     # next byte after 0xFE is the payload
+    type: bool
+    initial_value: 'false'
+  - id: run_s             # seconds of motion in the current duty window
+    type: float
+    initial_value: '0'
+  - id: locked_out
+    type: bool
+    initial_value: 'false'
+  - id: last_seen_in      # for stall detection
+    type: float
+    initial_value: '0'
+  - id: stall_s
+    type: float
+    initial_value: '0'
+
+switch:
+  # Closing either photoMOS ties its line to +5V, which is exactly what the
+  # physical panel button does. The panel keeps working in parallel.
+  - platform: gpio
+    id: press_up
+    pin: GPIO25
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    id: press_dn
+    pin: GPIO26
+    restore_mode: ALWAYS_OFF
+
+sensor:
+  - platform: template
+    name: "Desk Height"
+    id: height
+    unit_of_measurement: in
+    accuracy_decimals: 1
+    icon: mdi:arrow-expand-vertical
+
+binary_sensor:
+  - platform: template
+    name: "Desk Height Known"
+    lambda: return id(height_known);
+
+number:
+  - platform: template
+    name: "Desk Target Height"
+    id: target_in
+    unit_of_measurement: in
+    min_value: 27
+    max_value: 38
+    step: 1
+    optimistic: true
+    restore_value: true
+    initial_value: 30
+    set_action:
+      then: [script.execute: seek]
+
+interval:
+  # Drain the bus. At 1000 baud a 50ms tick cannot overrun the 64-byte buffer.
+  - interval: 50ms
+    then:
+      - lambda: |-
+          uint8_t b;
+          while (id(deskbus).available()) {
+            if (!id(deskbus).read_byte(&b)) break;
+            if (b == 0xFE) { id(expect_height) = true; continue; }
+            if (!id(expect_height)) continue;
+            id(expect_height) = false;
+            float in = (245.0f - (float) b) / 2.0f;
+            // Measured travel is 27.0in (69cm) to 38.0in (96cm). The box also
+            // emits handshake words on every button press; most self-reject
+            // because their 9th bit is 0 and the UART sees a framing error,
+            // but one of them slips through as 0xFE 0x80 -> 58.5in. The range
+            // gate is what kills it, so keep it tight to the real travel.
+            if (in < 26.0f || in > 39.0f) continue;
+            id(cur_in) = in;
+            id(height_known) = true;
+            id(height).publish_state(in);
+          }
+
+  # Duty cycle and stall watchdog. The box is rated 2 min on / 18 min off and
+  # will overheat if an automation fights it.
+  - interval: 500ms
+    then:
+      - lambda: |-
+          bool driving = id(press_up).state || id(press_dn).state;
+          if (driving) {
+            id(run_s) += 0.5f;
+            if (fabsf(id(cur_in) - id(last_seen_in)) < 0.01f) {
+              id(stall_s) += 0.5f;
+            } else {
+              id(stall_s) = 0.0f;
+              id(last_seen_in) = id(cur_in);
+            }
+            // No height change for 12s of driving means an end stop or an
+            // obstruction. Height only updates once per inch, so this must be
+            // generous or normal travel would trip it.
+            if (id(stall_s) > 12.0f) {
+              ESP_LOGW("desk", "no movement reported, stopping");
+              id(all_stop).execute();
+            }
+            if (id(run_s) > 100.0f) {
+              ESP_LOGW("desk", "duty limit reached, locking out");
+              id(locked_out) = true;
+              id(all_stop).execute();
+            }
+          } else {
+            id(run_s) = fmaxf(0.0f, id(run_s) - 0.05f);   // ~18 min recovery
+            id(stall_s) = 0.0f;
+            if (id(run_s) <= 0.0f) id(locked_out) = false;
+          }
+
+script:
+  - id: all_stop
+    then:
+      - switch.turn_off: press_up
+      - switch.turn_off: press_dn
+
+  # Height is only reported when it changes, so after a reboot we may not know
+  # where the desk is. A short jog forces the box to report.
+  - id: learn_height
+    then:
+      - if:
+          condition:
+            lambda: return !id(height_known);
+          then:
+            - switch.turn_on: press_up
+            - delay: 2s
+            - switch.turn_off: press_up
+            - delay: 1s
+
+  - id: seek
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return id(locked_out);
+          then:
+            - logger.log: "duty-cycle lockout, ignoring move"
+          else:
+            - script.execute: learn_height
+            - wait_until:
+                condition:
+                  lambda: return id(height_known);
+                timeout: 10s
+            # Bang-bang on the reported inch. There is no fine approach here:
+            # feedback is 1-inch granular, so stopping as soon as the target
+            # value is reported is as close as this signal can get you.
+            - while:
+                condition:
+                  lambda: |-
+                    return id(height_known) && !id(locked_out) &&
+                           fabsf(id(target_in).state - id(cur_in)) >= 1.0f;
+                then:
+                  - lambda: |-
+                      if (id(target_in).state > id(cur_in)) id(press_up).turn_on();
+                      else id(press_dn).turn_on();
+                  - delay: 100ms
+            - script.execute: all_stop
+
+button:
+  - platform: template
+    name: "Desk: Sit"
+    on_press: [number.set: {id: target_in, value: 30}]
+  - platform: template
+    name: "Desk: Stand"
+    on_press: [number.set: {id: target_in, value: 36}]
+  - platform: template
+    name: "Desk: Stop"
+    on_press:
+      - script.stop: seek
+      - script.execute: all_stop

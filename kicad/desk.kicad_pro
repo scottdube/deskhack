@@ -1,0 +1,9 @@
+{
+  "board": {},
+  "boards": [],
+  "libraries": {"pinned_footprint_libs": [], "pinned_symbol_libs": []},
+  "meta": {"filename": "desk.kicad_pro", "version": 3},
+  "net_settings": {"classes": [{"name": "Default", "clearance": 0.2, "track_width": 0.25}]},
+  "sheets": [["b1c0ffee-0000-4000-8000-000000000001", "Root"]],
+  "text_variables": {}
+}
