@@ -22,11 +22,11 @@ substitutions:
 #
 # HEIGHT: the box broadcasts on black at 1000 baud 9N1 (9-bit multi-drop),
 # one packet per INCH of displayed change plus a handshake burst on any
-# button press. A plain 8N1 UART decodes it: the 9th bit lands on the stop
-# slot (=1 for height words) and the 0x07F header mis-frames into a constant
-# 0xFE sync byte. So: wait for 0xFE, next byte b => inches = (245 - b) / 2.
-# Handshake words either fail 8N1 framing or are killed by the range gate
-# (one survivor decodes as 58.5 in; travel is 27.0-38.0 in measured).
+# button press. A plain 8N1 UART recovers the payload; on real ESP32
+# silicon (which KEEPS framing-error bytes) each packet arrives as
+# 00 7F <payload>: skip 0x00, sync on 0x7F, then inches = (245 - b) / 2.
+# Real heights are always ODD bytes; handshake words are even, gated, or
+# (0xBF only) rejected by a 600ms timing guard. Details in the RX lambda.
 # Verified against tape at 4 points across full travel, all within 0.5 cm.
 # Overnight drift test 2026-08-12: none (77 cm -> 77 cm under load).
 #
@@ -68,8 +68,8 @@ uart:
   data_bits: 8
   parity: NONE
   stop_bits: 1
-  # Commissioning aid: dump raw RX bytes to the log. Height packets should
-  # appear as FE <byte> pairs. Remove once the bus is proven.
+  # Commissioning aid: dump raw RX bytes to the log. Height packets appear
+  # as 00 7F <byte> groups. Remove once the bus is proven.
   debug:
     direction: RX
     after:
