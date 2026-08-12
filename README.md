@@ -122,8 +122,12 @@ editing the sheet, or retire the generator once you start hand-routing.
 - bang-bang seek loop (feedback is 1-inch granular; there is nothing finer to
   chase)
 - **duty-cycle watchdog** — the box is rated 2 min on / 18 min off and this is
-  enforced in firmware, don't remove it
+  enforced in firmware, don't remove it; Drive Budget and Budget Recovery
+  sensors expose how much motion is left before lockout
 - stall detection (no height change while driving → stop)
+- a template **cover** face (0% = bottom of travel, 100% = top) so voice
+  assistants can drive it with built-in position intents — no custom
+  sentences required, and it provides a voice "stop"
 
 Copy `wifi.yaml.example` to `wifi.yaml` first.
 

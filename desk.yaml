@@ -133,6 +133,28 @@ sensor:
     accuracy_decimals: 1
     icon: mdi:arrow-expand-vertical
 
+  # Duty-cycle visibility. The box is rated 2 min on / 18 min off; run_s
+  # accumulates while driving and decays at 0.1 s/s while idle, so a full
+  # budget takes ~16.7 min to restore. Lockout clears only at run_s <= 0.
+  - platform: template
+    name: "Drive Budget"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    icon: mdi:timer-sand
+    update_interval: 5s
+    lambda: return fmaxf(0.0f, 100.0f - id(run_s));
+
+  - platform: template
+    name: "Budget Recovery"
+    unit_of_measurement: min
+    accuracy_decimals: 1
+    entity_category: diagnostic
+    icon: mdi:timer-refresh-outline
+    update_interval: 5s
+    # run_s decays 0.1 per second of idle time
+    lambda: return id(run_s) / 0.1f / 60.0f;
+
 binary_sensor:
   - platform: template
     name: "Height Known"
@@ -160,6 +182,40 @@ number:
         # (observed 2026-08-12: "33 -> 38 does nothing, another nudge works").
         - lambda: id(target_in).publish_state(x);
         - script.execute: seek
+
+# Present the bench as a cover so voice assistants can drive it with the
+# built-in HassSetPosition / open / close / stop intents, no custom sentences
+# needed ("set the standing bench to 80 percent"). Position 0% = 27.0 in
+# (bottom of travel), 100% = 38.0 in (top). This is purely an alternative
+# face on the same seek loop -- Height, Target Height, Sit and Stand are
+# unaffected and keep working exactly as before.
+cover:
+  - platform: template
+    name: "Bench"
+    id: bench_cover
+    device_class: shade
+    has_position: true
+    lambda: |-
+      float p = (id(cur_in) - 27.0f) / 11.0f;
+      return p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
+    position_action:
+      - lambda: |-
+          // Snap to whole inches: the box only ever reports whole inches, so
+          // a finer target could never be satisfied and would drive forever.
+          float t = roundf(27.0f + pos * 11.0f);
+          if (t < 27.0f) t = 27.0f;
+          if (t > 38.0f) t = 38.0f;
+          id(target_in).publish_state(t);
+      - script.execute: seek
+    open_action:
+      - lambda: id(target_in).publish_state(38.0f);
+      - script.execute: seek
+    close_action:
+      - lambda: id(target_in).publish_state(27.0f);
+      - script.execute: seek
+    stop_action:
+      - script.stop: seek
+      - script.execute: all_stop
 
 interval:
   # Drain the bus. At 1000 baud a 50ms tick cannot overrun the 64-byte buffer.
@@ -293,7 +349,7 @@ button:
   - platform: template
     name: "Sit"
     icon: mdi:chair-rolling
-    on_press: [number.set: {id: target_in, value: 30}]
+    on_press: [number.set: {id: target_in, value: 29}]
   - platform: template
     name: "Stand"
     icon: mdi:human-handsup
