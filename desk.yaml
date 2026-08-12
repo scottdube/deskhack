@@ -78,7 +78,11 @@ uart:
 globals:
   - id: cur_in            # last reported height, inches
     type: float
-    restore_value: yes
+    # Deliberately NOT restored across reboots: the desk can move (panel
+    # presses) while the ESP32 is off, and a stale restored height creates a
+    # dead zone where seeks inside the error do nothing. Observed as "target
+    # must be 4in away to work" on 2026-08-12. Every boot re-learns instead.
+    restore_value: no
     initial_value: '30'
   - id: height_known      # false until the box has told us something
     type: bool
@@ -222,8 +226,11 @@ script:
       - switch.turn_off: press_up
       - switch.turn_off: press_dn
 
-  # The box only reports on change, so after a reboot height is unknown
-  # until the desk moves. A short jog forces a report.
+  # The box only reports on change, so after a reboot height is unknown until
+  # something presses a button. Luckily the handshake burst the box emits on
+  # ANY press carries the current height in its 4th packet (~300ms in), so a
+  # blip far too short to move the desk a visible amount is enough to learn
+  # where it is.
   - id: learn_height
     then:
       - if:
@@ -231,9 +238,9 @@ script:
             lambda: return !id(height_known);
           then:
             - switch.turn_on: press_up
-            - delay: 2s
+            - delay: 600ms
             - switch.turn_off: press_up
-            - delay: 1s
+            - delay: 500ms
 
   - id: seek
     mode: restart
