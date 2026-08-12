@@ -68,20 +68,29 @@ controller itself acts on.
 
 ### The 8N1 trick
 
-You do not need 9-bit UART support to read this bus. In a plain **8N1** UART at
-1000 baud, the 9th data bit of the payload word lands where the stop bit is
-expected — and it happens to be 1 for every height word, so the frame
-validates. The `0x07F` header mis-frames into a constant **`0xFE`**, which
-serves as a free sync marker. Each height report therefore arrives at an
-ordinary UART as:
+You do not need 9-bit UART support to read this bus — a plain **8N1** UART at
+1000 baud recovers every payload byte intact. But how the packet arrives
+depends on how the UART handles framing errors, and real ESP32 silicon
+differs from the obvious simulation:
 
-```
-0xFE <height byte>
-```
+- A UART that **discards** error bytes and resyncs bit-by-bit (what a naive
+  software decoder does) sees the header mis-frame into a constant `0xFE`
+  sync marker followed by the height byte.
+- The **ESP32 keeps** framing-error bytes (verified on an ESP32-WROOM-32,
+  ESP-IDF 5.5). Packets arrive as `00 7F <payload>`: the header comes through
+  verbatim as `0x7F`, each framing error also emits a `0x00` artifact, and
+  the payload byte is unmangled.
 
-Handshake words have the 9th bit clear, fail the fake stop bit, and are
-discarded by the UART hardware for you. One survivor (`0xFE 0x80` → "58.5 in")
-is rejected by range-gating to the desk's physical travel.
+Either way the sync-then-payload structure survives. On the ESP32: skip
+`0x00`, treat `0x7F` as "next byte is payload".
+
+Filtering the handshake burst is easy thanks to an accident of the encoding:
+**real heights are always odd bytes** (`245 - 2*inches`), and the handshake
+constants are even or outside the travel range — except `0x0BF`, which
+aliases a true 27.0 in reading. Its tell is timing: as a handshake word it
+arrives within ~400 ms of the others, as a real height it arrives alone, so
+reject `0xBF` seen within 600 ms of other handshake traffic. The working
+lambda is in `desk.yaml`.
 
 ## Hardware
 

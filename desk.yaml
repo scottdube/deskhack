@@ -1,27 +1,47 @@
-## ErgoSwiss / LOGICDATA COMPACT-e-3-VAL desk controller
-##
-## Wiring to the cut 7-pin DIN handset extension:
-##   brown  GND      -> ESP32 GND (required, everything is referenced to it)
-##   red    +5V      -> common side of both photoMOS outputs
-##   white  UP       -> photoMOS 1 output
-##   yellow DOWN     -> photoMOS 2 output
-##   black  data out -> 10k/20k divider -> GPIO16 (5V bus, 3.3V pin)
-##
-## The button lines are ACTIVE HIGH: they idle at 0V and a press connects them
-## to +5V. An ESP32 GPIO cannot assert 5V, which is why this uses photoMOS
-## relays (CPC1017N) closing a contact to the red wire rather than MOSFETs
-## pulling to ground. Drive each LED from a GPIO through ~330R.
-##
-## The box reports height as 1000 baud 9N1, but a plain 8N1 UART decodes it:
-## the 9th data bit sits where the stop bit is expected and is 1 for every
-## height word, while the packet header mis-frames into a constant 0xFE that
-## serves as a free sync marker. Each report is therefore 0xFE, <height byte>.
-##   inches = (245 - byte) / 2
-## The box only transmits when the displayed inch changes, so readings are
-## coarse (1 inch) and event-driven, not a continuous stream.
+substitutions:
+  device_name: desk
+  friendly_name: Standing Desk
+
+# ErgoSwiss hydraulic standing desk on a LOGICDATA COMPACT-e-3-VAL-ES-US
+# control box ("Compact-3-eco", software V290). Full reverse-engineering
+# writeup: https://github.com/scottdube/deskhack
+#
+# ============================ ARCHITECTURE (settled 2026-08-11) ==============
+# Tap on the 7-pin DIN handset cable, inline between box and the original
+# up/down panel (panel keeps working in parallel). Wire colours are the cut
+# extension cable's, verified by measurement — NOT the DIN pin numbers.
+#
+#   brown  GND     red +5V     white UP     yellow DOWN     black data-out
+#   green/blue = HS3/HS4, unused by the dumb panel (memory-handset lines)
+#
+# BUTTON LINES ARE ACTIVE-HIGH and high-impedance: a press connects the line
+# to +5V (an ohmmeter's source current was enough to command motion). Drive:
+#   GPIO -> 330R -> PC817 LED; opto output ties line to +5V like a finger.
+#   100k bleed emitter->GND so leakage can't float an input high.
+#   Optos release dark => unpowered/booting ESP32 cannot move the desk.
+#
+# HEIGHT: the box broadcasts on black at 1000 baud 9N1 (9-bit multi-drop),
+# one packet per INCH of displayed change plus a handshake burst on any
+# button press. A plain 8N1 UART decodes it: the 9th bit lands on the stop
+# slot (=1 for height words) and the 0x07F header mis-frames into a constant
+# 0xFE sync byte. So: wait for 0xFE, next byte b => inches = (245 - b) / 2.
+# Handshake words either fail 8N1 framing or are killed by the range gate
+# (one survivor decodes as 58.5 in; travel is 27.0-38.0 in measured).
+# Verified against tape at 4 points across full travel, all within 0.5 cm.
+# Overnight drift test 2026-08-12: none (77 cm -> 77 cm under load).
+#
+# CHANNELS (30-pin DevKit V1):
+#   D25 GPIO25 -> opto U1 -> white  (UP)
+#   D26 GPIO26 -> opto U2 -> yellow (DOWN)
+#   RX2 GPIO16 <- 22k / (22k+22k) divider <- black (5V bus, 3.3V pin)
+#
+# DUTY CYCLE: the box is rated 2 min on / 18 min off and the watchdog below
+# enforces it. Do not remove it, do not build nudge-every-N-minutes
+# automations on top of this device.
 
 esphome:
-  name: desk
+  name: ${device_name}
+  friendly_name: ${friendly_name}
   on_boot:
     priority: -100
     then:
@@ -29,13 +49,17 @@ esphome:
 
 esp32:
   board: esp32dev
+  framework:
+    type: esp-idf
 
-wifi: !include wifi.yaml
-api:
 logger:
-  level: INFO
+
+api:
+
 ota:
   - platform: esphome
+
+wifi: !include wifi.yaml
 
 uart:
   id: deskbus
@@ -44,7 +68,12 @@ uart:
   data_bits: 8
   parity: NONE
   stop_bits: 1
-  rx_buffer_size: 64
+  # Commissioning aid: dump raw RX bytes to the log. Height packets should
+  # appear as FE <byte> pairs. Remove once the bus is proven.
+  debug:
+    direction: RX
+    after:
+      timeout: 100ms
 
 globals:
   - id: cur_in            # last reported height, inches
@@ -71,20 +100,30 @@ globals:
     initial_value: '0'
 
 switch:
-  # Closing either photoMOS ties its line to +5V, which is exactly what the
-  # physical panel button does. The panel keeps working in parallel.
+  # Closing either opto ties its line to +5V, exactly what the panel button
+  # does. The panel keeps working in parallel.
   - platform: gpio
     id: press_up
+    name: "Press Up"
+    icon: mdi:arrow-up-bold
     pin: GPIO25
     restore_mode: ALWAYS_OFF
   - platform: gpio
     id: press_dn
+    name: "Press Down"
+    icon: mdi:arrow-down-bold
     pin: GPIO26
     restore_mode: ALWAYS_OFF
 
 sensor:
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 30s
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
   - platform: template
-    name: "Desk Height"
+    name: "Height"
     id: height
     unit_of_measurement: in
     accuracy_decimals: 1
@@ -92,12 +131,15 @@ sensor:
 
 binary_sensor:
   - platform: template
-    name: "Desk Height Known"
+    name: "Height Known"
     lambda: return id(height_known);
+  - platform: template
+    name: "Duty Lockout"
+    lambda: return id(locked_out);
 
 number:
   - platform: template
-    name: "Desk Target Height"
+    name: "Target Height"
     id: target_in
     unit_of_measurement: in
     min_value: 27
@@ -114,26 +156,37 @@ interval:
   - interval: 50ms
     then:
       - lambda: |-
+          // Observed on real silicon (2026-08-12): the ESP32 UART KEEPS
+          // framing-error bytes rather than discarding them, so the 9-bit
+          // packet arrives as [00 artifact] 7F <payload> instead of the
+          // FE <payload> a discard-and-resync UART would produce.
+          //   - 0x00       framing-error artifact, one per packet: skip
+          //   - 0x7F       packet header: next byte is the payload
+          //   - heights    always ODD (b = 245 - 2*inches), 0xA9..0xBF
+          //   - handshake  constants D7/01/04/BC/...: all even or gated,
+          //                EXCEPT 0xBF which aliases a true 27.0in reading.
+          //                It always arrives within ~400ms of the other
+          //                handshake words, so a timing guard kills it.
+          static uint32_t last_hs_ms = 0;
           uint8_t b;
           while (id(deskbus).available()) {
             if (!id(deskbus).read_byte(&b)) break;
-            if (b == 0xFE) { id(expect_height) = true; continue; }
+            if (b == 0x00) continue;
+            if (b == 0x7F) { id(expect_height) = true; continue; }
             if (!id(expect_height)) continue;
             id(expect_height) = false;
             float in = (245.0f - (float) b) / 2.0f;
-            // Measured travel is 27.0in (69cm) to 38.0in (96cm). The box also
-            // emits handshake words on every button press; most self-reject
-            // because their 9th bit is 0 and the UART sees a framing error,
-            // but one of them slips through as 0xFE 0x80 -> 58.5in. The range
-            // gate is what kills it, so keep it tight to the real travel.
-            if (in < 26.0f || in > 39.0f) continue;
+            bool odd = (b & 1) != 0;
+            bool in_range = in >= 26.0f && in <= 39.0f;
+            if (!odd || !in_range) { last_hs_ms = millis(); continue; }
+            if (b == 0xD7) { last_hs_ms = millis(); continue; }   // 15in: handshake
+            if (b == 0xBF && (millis() - last_hs_ms) < 600) continue;
             id(cur_in) = in;
             id(height_known) = true;
             id(height).publish_state(in);
           }
 
-  # Duty cycle and stall watchdog. The box is rated 2 min on / 18 min off and
-  # will overheat if an automation fights it.
+  # Duty-cycle and stall watchdog. Box rating: 2 min on / 18 min off.
   - interval: 500ms
     then:
       - lambda: |-
@@ -146,9 +199,8 @@ interval:
               id(stall_s) = 0.0f;
               id(last_seen_in) = id(cur_in);
             }
-            // No height change for 12s of driving means an end stop or an
-            // obstruction. Height only updates once per inch, so this must be
-            // generous or normal travel would trip it.
+            // Height only updates once per inch (~1.7s of travel), so the
+            // stall threshold must be generous or normal moves would trip it.
             if (id(stall_s) > 12.0f) {
               ESP_LOGW("desk", "no movement reported, stopping");
               id(all_stop).execute();
@@ -170,8 +222,8 @@ script:
       - switch.turn_off: press_up
       - switch.turn_off: press_dn
 
-  # Height is only reported when it changes, so after a reboot we may not know
-  # where the desk is. A short jog forces the box to report.
+  # The box only reports on change, so after a reboot height is unknown
+  # until the desk moves. A short jog forces a report.
   - id: learn_height
     then:
       - if:
@@ -197,9 +249,8 @@ script:
                 condition:
                   lambda: return id(height_known);
                 timeout: 10s
-            # Bang-bang on the reported inch. There is no fine approach here:
-            # feedback is 1-inch granular, so stopping as soon as the target
-            # value is reported is as close as this signal can get you.
+            # Bang-bang on the reported inch. Feedback is 1-inch granular;
+            # stop as soon as the target value is reported.
             - while:
                 condition:
                   lambda: |-
@@ -214,13 +265,18 @@ script:
 
 button:
   - platform: template
-    name: "Desk: Sit"
+    name: "Sit"
+    icon: mdi:chair-rolling
     on_press: [number.set: {id: target_in, value: 30}]
   - platform: template
-    name: "Desk: Stand"
+    name: "Stand"
+    icon: mdi:human-handsup
     on_press: [number.set: {id: target_in, value: 36}]
   - platform: template
-    name: "Desk: Stop"
+    name: "Stop"
+    icon: mdi:stop-circle-outline
     on_press:
       - script.stop: seek
       - script.execute: all_stop
+  - platform: restart
+    name: "Restart"
