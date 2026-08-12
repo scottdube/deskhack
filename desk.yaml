@@ -153,7 +153,13 @@ number:
     restore_value: true
     initial_value: 30
     set_action:
-      then: [script.execute: seek]
+      then:
+        # A template number fires set_action BEFORE publishing the new state,
+        # so id(target_in).state still holds the OLD value in here. Publish
+        # first, then seek, or every move chases the previous command
+        # (observed 2026-08-12: "33 -> 38 does nothing, another nudge works").
+        - lambda: id(target_in).publish_state(x);
+        - script.execute: seek
 
 interval:
   # Drain the bus. At 1000 baud a 50ms tick cannot overrun the 64-byte buffer.
@@ -245,6 +251,10 @@ script:
   - id: seek
     mode: restart
     then:
+      - lambda: |-
+          ESP_LOGI("desk", "seek: target %.0f, current %.0f, known %d, lockout %d",
+                   id(target_in).state, id(cur_in), id(height_known),
+                   id(locked_out));
       - if:
           condition:
             lambda: return id(locked_out);
@@ -271,6 +281,15 @@ script:
             - script.execute: all_stop
 
 button:
+  # Home Assistant sends nothing when a slider is dragged to the value it
+  # already holds, so Target Height alone cannot re-trigger a move (observed
+  # 2026-08-12: "won't move until I change the command by an inch"). This
+  # button runs the seek unconditionally against whatever the target says.
+  - platform: template
+    name: "Go To Target"
+    icon: mdi:play-circle-outline
+    on_press: [script.execute: seek]
+
   - platform: template
     name: "Sit"
     icon: mdi:chair-rolling
@@ -278,7 +297,8 @@ button:
   - platform: template
     name: "Stand"
     icon: mdi:human-handsup
-    on_press: [number.set: {id: target_in, value: 36}]
+    # 38.0 in is the measured top of travel; the box stops itself there.
+    on_press: [number.set: {id: target_in, value: 38}]
   - platform: template
     name: "Stop"
     icon: mdi:stop-circle-outline
