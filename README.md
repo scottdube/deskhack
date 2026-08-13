@@ -108,6 +108,13 @@ Eight components, all through-hole:
 The tap itself is a male-female 7-pin DIN extension cable cut in half and
 landed on lever nuts, so the whole thing unplugs back to stock in seconds.
 
+![The tap: a 7-pin DIN extension cut in half, each conductor landed in a
+WAGO 221 lever nut with a pigtail out to the logic analyzer](docs/tap.jpeg)
+
+Nothing is soldered and nothing on the desk is modified — the box and the
+original panel each keep their own connector, and the lever nuts sit in
+between. Pull the two halves and the desk is stock again.
+
 `kicad/` contains a KiCad 10 project (ERC-clean, footprints assigned) with the
 interface circuit and a 30-pin ESP32 DevKit V1 socket, ready for board layout.
 The schematic is *generated* — edit `kicad/gen_sch.py` and rerun rather than
