@@ -39,9 +39,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.8,
-          "height": 1.27,
-          "width": 2.54
+          "drill": 3.2,
+          "height": 3.2,
+          "width": 3.2
         },
         "silk_line_width": 0.1,
         "silk_text_italic": false,
@@ -70,7 +70,12 @@
         }
       },
       "diff_pair_dimensions": [],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        [
+          "lib_footprint_mismatch|136525000|121525000|41bdfe77-ccb5-42ad-b1f9-2b0a11c7b2fd|00000000-0000-0000-0000-000000000000",
+          "shortened name and locked it"
+        ]
+      ],
       "meta": {
         "version": 2
       },
@@ -127,7 +132,7 @@
         "too_many_vias": "error",
         "track_angle": "error",
         "track_dangling": "warning",
-        "track_not_centered_on_via": "ignore",
+        "track_not_centered_on_via": "warning",
         "track_on_post_machined_layer": "error",
         "track_segment_length": "error",
         "track_width": "error",
@@ -140,7 +145,7 @@
       },
       "rules": {
         "max_error": 0.005,
-        "min_clearance": 0.5,
+        "min_clearance": 0.4,
         "min_connection": 0.0,
         "min_copper_edge_clearance": 0.5,
         "min_groove_width": 0.0,
@@ -203,13 +208,7 @@
           "td_width_to_size_filter_ratio": 0.9
         }
       ],
-      "track_widths": [
-        0.0,
-        0.6,
-        1.0,
-        1.5,
-        2.0
-      ],
+      "track_widths": [],
       "tuning_pattern_settings": {
         "diff_pair_defaults": {
           "corner_radius_percentage": 80,
@@ -236,16 +235,7 @@
           "spacing": 0.6
         }
       },
-      "via_dimensions": [
-        {
-          "diameter": 0.0,
-          "drill": 0.0
-        },
-        {
-          "diameter": 1.6,
-          "drill": 0.8
-        }
-      ],
+      "via_dimensions": [],
       "zones_allow_external_fillets": false
     },
     "ipc2581": {
@@ -512,7 +502,6 @@
         "bus_width": 12,
         "clearance": 0.5,
         "diff_pair_gap": 0.25,
-        "diff_pair_via_gap": 0.25,
         "diff_pair_width": 0.2,
         "line_style": 0,
         "microvia_diameter": 0.3,
@@ -542,32 +531,7 @@
     },
     "net_colors": null,
     "netclass_assignments": null,
-    "netclass_patterns": [
-      {
-        "netclass": "Power",
-        "pattern": "GND"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "+5V"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "+3V3"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "+12V"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "VCC"
-      },
-      {
-        "netclass": "Power",
-        "pattern": "VIN"
-      }
-    ]
+    "netclass_patterns": []
   },
   "pcbnew": {
     "last_paths": {
@@ -694,16 +658,16 @@
       {
         "filename": "desk.kicad_sch",
         "name": "desk",
-        "uuid": "00000000-0000-0000-0000-000000000000"
+        "uuid": "b1c0ffee-0000-4000-8000-000000000001"
       }
     ],
-    "used_designators": "",
+    "used_designators": "TP1,J4",
     "variants": []
   },
   "sheets": [
     [
       "b1c0ffee-0000-4000-8000-000000000001",
-      "Root"
+      "desk"
     ]
   ],
   "text_variables": {},
