@@ -2,7 +2,7 @@
 """Decode the box's data line as discrete packets.
 
 Usage:
-    python3 messages.py ~/desk.csv
+    python3 messages.py desk.csv
 
 The line is not a continuous stream. It sends bursts of 32-bit packets at
 ~80ms intervals separated by a long low, so packets are segmented on that

@@ -2,7 +2,7 @@
 """Characterize the box's data line and attempt a UART decode.
 
 Usage:
-    python3 dataline.py ~/desk.csv [glitch_us]
+    python3 dataline.py desk.csv [glitch_us]
 
 Measures the bit time from the run-length distribution rather than trusting
 the 1000 baud figure published for other LOGICDATA models, then tries the

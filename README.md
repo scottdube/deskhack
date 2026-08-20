@@ -115,6 +115,26 @@ Nothing is soldered and nothing on the desk is modified — the box and the
 original panel each keep their own connector, and the lever nuts sit in
 between. Pull the two halves and the desk is stock again.
 
+![The injection rig: a cheap male-female 7-pin DIN extension cut in half, both
+halves landed in WAGO 221 lever nuts. Male end to the control box, female end
+to the original handset.](docs/injection-rig.jpeg)
+
+**This rig is the whole trick, and it generalises.** It is a $10 extension
+cable, not the desk's harness. Cutting it gives you seven conductors broken out
+into lever nuts, which is simultaneously a **probe point** for the logic
+analyzer and an **injection point** for the ESP32 — read the bus and drive it
+without ever putting a knife near the cable that came with the machine. Get it
+wrong, unplug two connectors, and the desk has never been touched. Any bus
+that runs through a detachable cable can be attacked this way.
+
+![The finished board wired to the rig on the bench, before install. The
+wire-colour legend along each terminal block matches the DIN conductor
+colours.](docs/board-and-rig.jpeg)
+
+The board keeps the same idea: J1 and J4 are wired straight through, so the
+control box and the original handset each land on their own terminal block and
+the ESP32 sits across the pair. The panel goes on working exactly as before.
+
 `kicad/` contains a KiCad 10 project (ERC-clean, footprints assigned) with the
 interface circuit and a 30-pin ESP32 DevKit V1 socket, ready for board layout.
 The schematic is *generated* — edit `kicad/gen_sch.py` and rerun rather than
@@ -130,7 +150,10 @@ editing the sheet, or retire the generator once you start hand-routing.
   chase)
 - **duty-cycle watchdog** — the box is rated 2 min on / 18 min off and this is
   enforced in firmware, don't remove it; Drive Budget and Budget Recovery
-  sensors expose how much motion is left before lockout
+  sensors expose how much motion is left before lockout. The budget persists
+  across reboots (and credits real elapsed time while powered off), so an OTA
+  can't hand you a fresh one. A diagnostic **Reset Duty Budget** button exists
+  for bench work — deliberate operator action only, never automate it
 - stall detection (no height change while driving → stop)
 - a template **cover** face (0% = bottom of travel, 100% = top) so voice
   assistants can drive it with built-in position intents — no custom

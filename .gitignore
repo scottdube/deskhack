@@ -19,3 +19,7 @@ drc.rpt
 board.svg
 kicad/svg/
 kicad/gerbers/
+# macOS
+.DS_Store
+kicad/inventree_map.json
+CONTINUITY-CHECK.md

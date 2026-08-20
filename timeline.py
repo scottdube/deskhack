@@ -2,7 +2,7 @@
 """Read the LOGICDATA handset bus as a 4-bit button code over time.
 
 Usage:
-    python3 timeline.py ~/desk.csv [glitch_us]
+    python3 timeline.py desk.csv [glitch_us]
 
 Capture channel order must be D0..D6 = red, green, yellow, white, brown,
 blue, black. Red is the +5V rail and brown is ground, so the button code is

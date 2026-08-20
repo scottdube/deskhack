@@ -59,7 +59,32 @@ api:
 ota:
   - platform: esphome
 
+# Copy wifi.yaml.example -> wifi.yaml and fill it in. wifi.yaml is gitignored.
 wifi: !include wifi.yaml
+
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      then:
+        # First valid clock after boot: credit the cooldown that elapsed while
+        # we were off. Guarded by a one-shot so periodic re-syncs don't
+        # double-decay against the 500ms loop that also drains run_s.
+        - if:
+            condition:
+              lambda: return !id(budget_credited);
+            then:
+              - lambda: |-
+                  id(budget_credited) = true;
+                  auto now = id(ha_time).now();
+                  if (!now.is_valid() || id(budget_stamp) == 0) return;
+                  uint32_t t = now.timestamp;
+                  if (t <= id(budget_stamp)) return;
+                  float off_s = (float) (t - id(budget_stamp));
+                  id(run_s) = fmaxf(0.0f, id(run_s) - 0.1f * off_s);
+                  if (id(run_s) <= 0.0f) id(locked_out) = false;
+                  ESP_LOGI("desk", "credited %.0fs offline, budget now %.0f%%",
+                           off_s, 100.0f - id(run_s));
 
 uart:
   id: deskbus
@@ -90,11 +115,25 @@ globals:
   - id: expect_height     # next byte after 0xFE is the payload
     type: bool
     initial_value: 'false'
+  # Duty state IS restored across reboots -- otherwise every OTA hands back a
+  # full budget and the 2/18 rating stops meaning anything during development.
+  # budget_stamp lets a reboot credit real elapsed time instead of freezing
+  # the accumulator, so a long power-off doesn't come back still locked out.
   - id: run_s             # seconds of motion in the current duty window
     type: float
+    restore_value: yes
     initial_value: '0'
   - id: locked_out
     type: bool
+    restore_value: yes
+    initial_value: 'false'
+  - id: budget_stamp      # unix seconds when run_s was last updated
+    type: uint32_t
+    restore_value: yes
+    initial_value: '0'
+  - id: budget_credited   # one-shot: catch-up runs once per boot
+    type: bool
+    restore_value: no
     initial_value: 'false'
   - id: last_seen_in      # for stall detection
     type: float
@@ -191,7 +230,9 @@ number:
 # unaffected and keep working exactly as before.
 cover:
   - platform: template
-    name: "Bench"
+    # name: None makes this the device's primary entity, so it lands as
+    # cover.sln_standing_bench rather than "...Standing Bench Bench".
+    name: None
     id: bench_cover
     device_class: shade
     has_position: true
@@ -269,11 +310,22 @@ interval:
             // stall threshold must be generous or normal moves would trip it.
             if (id(stall_s) > 12.0f) {
               ESP_LOGW("desk", "no movement reported, stopping");
+              // MUST stop the seek script, not just the switches. seek's while
+              // loop re-asserts press_up every 100 ms and its exit condition
+              // tests only height_known / locked_out / distance-to-target --
+              // none of which a stall changes. all_stop alone just turns the
+              // switch off between loop iterations, and the two fight forever:
+              // observed 2026-08-14 oscillating ~2 Hz, burning duty budget at
+              // full drive rate with the desk stationary and hammering the
+              // opto. The lockout branch below escapes this only because
+              // locked_out IS in the loop condition.
+              id(seek).stop();
               id(all_stop).execute();
             }
             if (id(run_s) > 100.0f) {
               ESP_LOGW("desk", "duty limit reached, locking out");
               id(locked_out) = true;
+              id(seek).stop();
               id(all_stop).execute();
             }
           } else {
@@ -281,6 +333,10 @@ interval:
             id(stall_s) = 0.0f;
             if (id(run_s) <= 0.0f) id(locked_out) = false;
           }
+          // Stamp the accumulator so a reboot can credit real elapsed time.
+          // Writes are batched by the preferences component, not per tick.
+          auto now = id(ha_time).now();
+          if (now.is_valid()) id(budget_stamp) = now.timestamp;
 
 script:
   - id: all_stop
@@ -361,5 +417,31 @@ button:
     on_press:
       - script.stop: seek
       - script.execute: all_stop
+  # Bench-testing escape hatch. The lockout clears only at run_s <= 0, i.e. a
+  # FULL ~16.7 min recovery with no partial credit, and run_s/locked_out both
+  # have restore_value: yes so a reboot does not clear them either. During
+  # bring-up that stops debug cycles cold while the desk is not even moving --
+  # the budget accumulates on COMMANDED drive time, not measured motion.
+  #
+  # This does not weaken the watchdog: it is an explicit, deliberate operator
+  # action, filed under diagnostics. Nothing automatic touches it. Do not wire
+  # it into an automation -- that is how the 2 min on / 18 min off rating gets
+  # quietly defeated and the box overheats.
+  #
+  # budget_stamp is re-stamped to now, otherwise the next boot's catch-up would
+  # credit elapsed time against a stale mark.
+  - platform: template
+    name: "Reset Duty Budget"
+    icon: mdi:timer-off-outline
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          ESP_LOGW("desk", "duty budget reset by operator (was %.0f%%, lockout %d)",
+                   100.0f - id(run_s), id(locked_out));
+          id(run_s) = 0.0f;
+          id(locked_out) = false;
+          auto now = id(ha_time).now();
+          if (now.is_valid()) id(budget_stamp) = now.timestamp;
+
   - platform: restart
     name: "Restart"

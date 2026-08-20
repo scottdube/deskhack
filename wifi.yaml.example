@@ -1,4 +1,12 @@
 # Copy to wifi.yaml and fill in. wifi.yaml is gitignored.
-wifi:
-  ssid: "your-ssid"
-  password: "your-password"
+#
+# This file provides the CONTENTS of the wifi: block, not the key itself --
+# desk.yaml has `wifi: !include wifi.yaml`, so a `wifi:` line here would nest
+# it twice and fail with "[wifi] is an invalid option for [wifi]".
+ssid: "your-ssid"
+password: "your-password"
+
+# Optional fallback AP if your network is unavailable:
+# ap:
+#   ssid: "desk setup"
+#   password: "at-least-8-chars"

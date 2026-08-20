@@ -2,8 +2,8 @@
 """Render a capture as a self-contained interactive waveform page.
 
 Usage:
-    python3 viewer.py ~/desk.csv [out.html] [glitch_us]
-    open ~/desk.html
+    python3 viewer.py desk.csv [out.html] [glitch_us]
+    open desk.html
 
 Channel order must be D0..D6 = red, green, yellow, white, brown, blue, black.
 Traces are run-length encoded before embedding, which is what keeps a
