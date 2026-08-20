@@ -135,6 +135,28 @@ The board keeps the same idea: J1 and J4 are wired straight through, so the
 control box and the original handset each land on their own terminal block and
 the ESP32 sits across the pair. The panel goes on working exactly as before.
 
+### The cable shield is left floating — on purpose
+
+The handset cable is seven conductors **plus a shield**, and the shield is not
+grounded here. That is deliberate, and it is worth stating plainly because the
+instinct on seeing an ungrounded shield is that somebody forgot.
+
+**It is not grounded in the desk's own wiring.** The two halves of the tap have
+their drains joined to each other, so the shield stays electrically continuous
+end to end exactly as it was before the cable was cut — and it terminates
+nowhere, exactly as it did before.
+
+Why not "improve" it: **the whole design goal is that the control box cannot
+tell the difference.** Everything else here is built that way — the original
+panel keeps working, the box keeps its own connector, nothing is soldered to
+the desk. Bonding the shield to logic ground would be a change to a mains-fed
+system whose internal grounding we cannot see, in exchange for a benefit
+nothing has demonstrated a need for. If the box grounds the shield at its end,
+adding a second bond creates a loop.
+
+No idea *why* LOGICDATA left it floating. Matching what the manufacturer did is
+the conservative choice when you do not know the reason.
+
 `kicad/` contains a KiCad 10 project (ERC-clean, footprints assigned) with the
 interface circuit and a 30-pin ESP32 DevKit V1 socket, ready for board layout.
 The schematic is *generated* — edit `kicad/gen_sch.py` and rerun rather than
