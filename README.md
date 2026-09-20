@@ -181,6 +181,44 @@ editing the sheet, or retire the generator once you start hand-routing.
   assistants can drive it with built-in position intents — no custom
   sentences required, and it provides a voice "stop"
 
+### Voice control: use the cover, not the buttons
+
+The cover face is not a convenience — on Home Assistant it is the *only* part of
+this firmware a voice assistant can reach without extra configuration, and that
+is worth stating plainly because the sit/stand buttons look like the obvious
+target.
+
+HA's local sentence matcher only recognises entities in a fixed set of domains.
+Measured against `home-assistant-intents` (en, 851 sentence templates): every
+template with a `{name}` slot carries a `requires_context.domain` allow-list, and
+the union of every domain any template can target is
+
+    binary_sensor climate cover fan input_boolean lawn_mower light lock
+    media_player person scene script sensor switch todo vacuum valve weather
+
+**`button` is not in that set.** So `button.<device>_sit` / `_stand` cannot be
+matched by any phrasing — and **entity aliases do not help**, because an alias
+only supplies candidate text for a `{name}` slot and there is no `{name}`
+template that accepts a button.
+
+What this costs depends on your pipeline. With a purely local assistant, the
+buttons are simply unreachable by voice. With an LLM conversation agent and
+"prefer handling commands locally" enabled, they still work — but they miss the
+local matcher every time and fall through to the LLM, so every "sit"/"stand"
+pays a full cloud round trip while `cover` commands answer instantly. That
+asymmetry is easy to misread as a problem with the desk, the ESP32 or the WiFi;
+it is none of those.
+
+Two ways to get fast sit/stand:
+
+- **Use the cover.** "raise / lower the standing desk" works with no extra
+  config. Note the cover's ends are the ends of *travel*, so "lower" goes to the
+  bottom of travel, which may be below your preferred sitting height.
+- **Add custom sentences** mapping your own phrases to an `intent_script` that
+  presses the buttons. This keeps one definition of "sit" and "stand" — in this
+  firmware, next to the duty-cycle watchdog — and preserves a non-travel-end
+  sitting height.
+
 Copy `wifi.yaml.example` to `wifi.yaml` first.
 
 ## Analysis tools
